@@ -1,0 +1,52 @@
+{
+  "default_provider": {
+    "description": "默认OCR服务商",
+    "type": "string",
+    "default": "ocrspace",
+    "options": ["ocrspace", "baidu", "tencent"],
+    "hint": "ocrspace无需注册即可使用，推荐"
+  },
+  "language": {
+    "description": "识别语言",
+    "type": "string",
+    "default": "chs",
+    "options": ["chs", "eng", "jpn", "kor"],
+    "hint": "chs=中文, eng=英文, jpn=日语, kor=韩语"
+  },
+  "ocrspace_use_free": {
+    "description": "使用OCRSpace免费额度",
+    "type": "bool",
+    "default": true,
+    "hint": "开启则无需注册和填写API Key，每月25000次免费额度。关闭后需填写API Key"
+  },
+  "ocrspace_apikey": {
+    "description": "OCRSpace API Key",
+    "type": "string",
+    "default": "",
+    "hint": "使用免费额度时无需填写。注册OCRSpace可获得更多额度"
+  },
+  "baidu_apikey": {
+    "description": "百度OCR API Key",
+    "type": "string",
+    "default": "",
+    "hint": "百度AI平台申请，免费额度50000次/天，需要注册"
+  },
+  "baidu_secretkey": {
+    "description": "百度OCR Secret Key",
+    "type": "string",
+    "default": "",
+    "hint": "与API Key配对使用"
+  },
+  "tencent_secretid": {
+    "description": "腾讯云SecretId",
+    "type": "string",
+    "default": "",
+    "hint": "腾讯云控制台申请，免费额度1000次/月，需要注册"
+  },
+  "tencent_secretkey": {
+    "description": "腾讯云SecretKey",
+    "type": "string",
+    "default": "",
+    "hint": "与SecretId配对使用"
+  }
+}

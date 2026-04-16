@@ -1,0 +1,6 @@
+name: astrbot_plugin_img_ocr
+display_name: 图片OCR识别
+desc: 图片OCR识别插件，支持OCRSpace、EasyOCR、百度OCR、腾讯云OCR多服务商
+version: v1.0.0
+author: zhist
+repo: https://github.com/zhist2028/astrbot_plugin_img_ocr
