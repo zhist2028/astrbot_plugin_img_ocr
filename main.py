@@ -8,6 +8,9 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 
 
+MAX_IMAGE_SIZE = 10 * 1024 * 1024
+
+
 @register(
     "astrbot_plugin_img_ocr",
     "zhist",
@@ -18,24 +21,42 @@ class ImageOCRPlugin(Star):
     def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
         self.config = config or {}
+        self.session: Optional[aiohttp.ClientSession] = None
+
+    async def initialize(self):
+        timeout = aiohttp.ClientTimeout(total=120, connect=30)
+        self.session = aiohttp.ClientSession(timeout=timeout)
+        logger.info("[OCR] 图片OCR识别插件初始化完成")
+
+    async def terminate(self):
+        if self.session and not self.session.closed:
+            await self.session.close()
+        logger.info("[OCR] 图片OCR识别插件已卸载")
 
     async def _get_image_bytes(self, image_url: str) -> Optional[bytes]:
         if image_url.startswith(("http://", "https://")):
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(image_url, timeout=30) as resp:
-                        if resp.status == 200:
-                            return await resp.read()
-                        else:
-                            logger.error(f"[OCR] 下载图片失败，状态码: {resp.status}")
+                async with self.session.get(image_url) as resp:
+                    if resp.status == 200:
+                        image_bytes = await resp.read()
+                        if len(image_bytes) > MAX_IMAGE_SIZE:
+                            logger.error(f"[OCR] 图片过大: {len(image_bytes)} bytes")
                             return None
+                        return image_bytes
+                    else:
+                        logger.error(f"[OCR] 下载图片失败，状态码: {resp.status}")
+                        return None
             except Exception as e:
                 logger.error(f"[OCR] 下载图片失败: {e}")
                 return None
         else:
             try:
                 with open(image_url, "rb") as f:
-                    return f.read()
+                    image_bytes = f.read()
+                if len(image_bytes) > MAX_IMAGE_SIZE:
+                    logger.error(f"[OCR] 图片过大: {len(image_bytes)} bytes")
+                    return None
+                return image_bytes
             except Exception as e:
                 logger.error(f"[OCR] 读取本地图片失败: {e}")
                 return None
@@ -57,21 +78,19 @@ class ImageOCRPlugin(Star):
         }
         
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    "https://api.ocr.space/parse/image",
-                    data=data,
-                    timeout=60
-                ) as resp:
-                    if resp.status == 200:
-                        result = await resp.json()
-                        if result.get("OCRExitCode") == 1:
-                            parsed = result.get("ParsedResults", [])
-                            if parsed:
-                                return parsed[0].get("ParsedText", "")
-                        err_msg = result.get("ErrorMessage", "未知错误")
-                        return f"OCR识别失败: {err_msg}"
-                    return f"API请求失败，状态码: {resp.status}"
+            async with self.session.post(
+                "https://api.ocr.space/parse/image",
+                data=data
+            ) as resp:
+                if resp.status == 200:
+                    result = await resp.json()
+                    if result.get("OCRExitCode") == 1:
+                        parsed = result.get("ParsedResults", [])
+                        if parsed:
+                            return parsed[0].get("ParsedText", "")
+                    err_msg = result.get("ErrorMessage", "未知错误")
+                    return f"OCR识别失败: {err_msg}"
+                return f"API请求失败，状态码: {resp.status}"
         except Exception as e:
             return f"OCR请求异常: {e}"
 
@@ -87,37 +106,34 @@ class ImageOCRPlugin(Star):
             return "百度OCR未配置API Key和Secret Key"
         
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id={api_key}&client_secret={secret_key}",
-                    timeout=30
-                ) as resp:
-                    if resp.status != 200:
-                        return f"获取百度Token失败，状态码: {resp.status}"
-                    token_data = await resp.json()
-                    access_token = token_data.get("access_token")
-                    if not access_token:
-                        return "获取百度Token失败"
-                    
-                    image_base64 = base64.b64encode(image_bytes).decode()
-                    lang_map = {"chs": "CHN_ENG", "eng": "ENG", "jpn": "JAP", "kor": "KOR"}
-                    language_type = lang_map.get(self.config.get("language", "chs"), "CHN_ENG")
-                    
-                    headers = {"Content-Type": "application/x-www-form-urlencoded"}
-                    async with session.post(
-                        f"https://aip.baidubce.com/rest/2.0/ocr/v1/general_basic?access_token={access_token}",
-                        data={"image": image_base64, "language_type": language_type},
-                        headers=headers,
-                        timeout=30
-                    ) as ocr_resp:
-                        if ocr_resp.status == 200:
-                            result = await ocr_resp.json()
-                            words_list = result.get("words_result", [])
-                            if words_list:
-                                texts = [item.get("words", "") for item in words_list]
-                                return "\n".join(texts)
-                            return "未识别到文字"
-                        return f"百度OCR请求失败，状态码: {ocr_resp.status}"
+            async with self.session.post(
+                f"https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id={api_key}&client_secret={secret_key}"
+            ) as resp:
+                if resp.status != 200:
+                    return f"获取百度Token失败，状态码: {resp.status}"
+                token_data = await resp.json()
+                access_token = token_data.get("access_token")
+                if not access_token:
+                    return "获取百度Token失败"
+                
+                image_base64 = base64.b64encode(image_bytes).decode()
+                lang_map = {"chs": "CHN_ENG", "eng": "ENG", "jpn": "JAP", "kor": "KOR"}
+                language_type = lang_map.get(self.config.get("language", "chs"), "CHN_ENG")
+                
+                headers = {"Content-Type": "application/x-www-form-urlencoded"}
+                async with self.session.post(
+                    f"https://aip.baidubce.com/rest/2.0/ocr/v1/general_basic?access_token={access_token}",
+                    data={"image": image_base64, "language_type": language_type},
+                    headers=headers
+                ) as ocr_resp:
+                    if ocr_resp.status == 200:
+                        result = await ocr_resp.json()
+                        words_list = result.get("words_result", [])
+                        if words_list:
+                            texts = [item.get("words", "") for item in words_list]
+                            return "\n".join(texts)
+                        return "未识别到文字"
+                    return f"百度OCR请求失败，状态码: {ocr_resp.status}"
         except Exception as e:
             return f"百度OCR请求异常: {e}"
 
@@ -184,21 +200,19 @@ class ImageOCRPlugin(Star):
                 "X-TC-Region": region,
             }
             
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"https://{endpoint}",
-                    headers=headers,
-                    data=payload,
-                    timeout=30
-                ) as resp:
-                    if resp.status == 200:
-                        result = await resp.json()
-                        text_detections = result.get("Response", {}).get("TextDetections", [])
-                        if text_detections:
-                            texts = [item.get("DetectedText", "") for item in text_detections]
-                            return "\n".join(texts)
-                        return "未识别到文字"
-                    return f"腾讯云OCR请求失败，状态码: {resp.status}"
+            async with self.session.post(
+                f"https://{endpoint}",
+                headers=headers,
+                data=payload
+            ) as resp:
+                if resp.status == 200:
+                    result = await resp.json()
+                    text_detections = result.get("Response", {}).get("TextDetections", [])
+                    if text_detections:
+                        texts = [item.get("DetectedText", "") for item in text_detections]
+                        return "\n".join(texts)
+                    return "未识别到文字"
+                return f"腾讯云OCR请求失败，状态码: {resp.status}"
         except Exception as e:
             return f"腾讯云OCR请求异常: {e}"
 
@@ -231,9 +245,3 @@ class ImageOCRPlugin(Star):
         
         result = await self._do_ocr(image_bytes, provider)
         return result if result else "未识别到文字"
-
-    async def initialize(self):
-        logger.info("[OCR] 图片OCR识别插件初始化完成")
-
-    async def terminate(self):
-        logger.info("[OCR] 图片OCR识别插件已卸载")
